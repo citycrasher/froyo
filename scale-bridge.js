@@ -6,41 +6,64 @@ import cors from 'cors';
 const app = express();
 app.use(cors());
 
+let port = null;
 let currentWeight = "0.000";
+let parser = null;
 
-console.log('Attempting to connect to Essae DS-852 on COM3...');
+console.log('Smart Scale Bridge waiting for POS commands...');
 
-const port = new SerialPort({
-  path: 'COM3',
-  baudRate: 9600,
-  autoOpen: true
+// Endpoint to grab the COM port
+app.get('/connect', (req, res) => {
+  if (port && port.isOpen) {
+    return res.json({ status: 'already_connected' });
+  }
+
+  currentWeight = "0.000";
+  port = new SerialPort({ 
+    path: 'COM3', 
+    baudRate: 9600, 
+    autoOpen: false 
+  });
+
+  parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+
+  parser.on('data', (data) => {
+    // Essae DS-852 format: "ST,GS,+  0.500kg"
+    const match = data.match(/(\d+\.\d+)/);
+    if (match) {
+      currentWeight = match[1];
+    }
+  });
+
+  port.open((err) => {
+    if (err) {
+      console.error('Failed to grab COM3:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+    console.log('>>> POS opened the popup: COM3 LOCKED');
+    res.json({ status: 'connected' });
+  });
 });
 
-const parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
-
-parser.on('data', (data) => {
-  // Typical Essae format: "ST,GS,+  0.500kg"
-  const match = data.match(/(\d+\.\d+)/);
-  if (match) {
-    currentWeight = match[1];
-    console.log(`Current Weight: ${currentWeight} kg`);
+// Endpoint to release the COM port
+app.get('/disconnect', (req, res) => {
+  if (port && port.isOpen) {
+    port.close((err) => {
+      console.log('<<< POS closed the popup: COM3 RELEASED');
+      currentWeight = "0.000";
+      res.json({ status: 'disconnected' });
+    });
+  } else {
+    res.json({ status: 'not_connected' });
   }
 });
 
-port.on('open', () => {
-  console.log('Connected to COM3 successfully.');
-});
-
-port.on('error', (err) => {
-  console.error('Serial Port Error:', err.message);
-});
-
+// Continuous weight reading
 app.get('/weight', (req, res) => {
   res.json({ weight: currentWeight });
 });
 
 const PORT = 5001;
 app.listen(PORT, () => {
-  console.log(`Scale bridge server running on http://localhost:${PORT}`);
-  console.log(`Endpoint: http://localhost:${PORT}/weight`);
+  console.log(`Smart Bridge running on http://localhost:${PORT}`);
 });
