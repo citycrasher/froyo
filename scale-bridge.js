@@ -128,3 +128,4 @@ const PORT = 5001;
 app.listen(PORT, () => {
   console.log(`Scale Bridge running on http://localhost:${PORT}`);
 });
+//npm install serialport @serialport/parser-readline express cors node-thermal-printer
