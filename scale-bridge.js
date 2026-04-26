@@ -3,6 +3,7 @@ import { ReadlineParser } from '@serialport/parser-readline';
 import express from 'express';
 import cors from 'cors';
 import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
+import printerList from 'printer';
 
 const app = express();
 app.use(cors());
@@ -12,7 +13,7 @@ let port = null;
 let currentWeight = "0.000";
 let parser = null;
 
-console.log('Smart Scale Bridge ready (Scale only)...');
+console.log('Smart Scale Bridge ready...');
 
 // --- SCALE ENDPOINTS ---
 
@@ -49,6 +50,17 @@ app.get('/weight', (req, res) => {
 });
 
 // --- PRINTER ENDPOINTS ---
+
+app.get('/list-printers', (req, res) => {
+  try {
+    const printers = printerList.getPrinters();
+    res.json(printers);
+  } catch (error) {
+    console.error("List Printers Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/print', async (req, res) => {
   const { 
     order_number, 
@@ -59,12 +71,15 @@ app.post('/print', async (req, res) => {
     discount, 
     total, 
     header_text, 
-    footer_text 
+    footer_text,
+    printer_name
   } = req.body;
+
+  console.log(`Attempting to print to: ${printer_name || 'System Default'}`);
 
   let printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
-    interface: 'printer:eSSAE pos-80',
+    interface: printer_name ? `printer:${printer_name}` : 'printer:eSSAE pos-80',
   });
 
   try {
@@ -128,4 +143,3 @@ const PORT = 5001;
 app.listen(PORT, () => {
   console.log(`Scale Bridge running on http://localhost:${PORT}`);
 });
-//npm install serialport @serialport/parser-readline express cors node-thermal-printer
