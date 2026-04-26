@@ -1,6 +1,5 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 const express = require('express');
@@ -9,19 +8,14 @@ const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-
 const app = express();
 app.use(cors());
 app.use(express.json());
-
 let port = null;
 let currentWeight = "0.000";
 let parser = null;
-
 console.log('Smart Scale Bridge ready (PowerShell Mode)...');
-
 // --- SCALE ENDPOINTS ---
-
 app.get('/connect', (req, res) => {
   if (port && port.isOpen) return res.json({ status: 'already_connected' });
   currentWeight = "0.000";
@@ -46,7 +40,6 @@ app.get('/connect', (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 app.get('/disconnect', (req, res) => {
   if (port && port.isOpen) {
     port.close(() => {
@@ -58,13 +51,10 @@ app.get('/disconnect', (req, res) => {
     res.json({ status: 'not_connected' });
   }
 });
-
 app.get('/weight', (req, res) => {
   res.json({ weight: currentWeight });
 });
-
 // --- PRINTER ENDPOINTS (POWERSHELL BASED) ---
-
 app.get('/list-printers', (req, res) => {
   console.log('Fetching system printers via PowerShell...');
   exec('powershell "Get-Printer | Select-Object -ExpandProperty Name"', (error, stdout) => {
@@ -81,19 +71,17 @@ app.get('/list-printers', (req, res) => {
     res.json(printers);
   });
 });
-
 app.post('/print', async (req, res) => {
   const { 
     order_number, restaurant_name, items, subtotal, tax, discount, total, header_text, footer_text, printer_name 
   } = req.body;
-
   const targetPrinter = printer_name || "eSSAE pos-80";
   console.log(`[DEBUG] Attempting to print to: "${targetPrinter}"`);
-
+  // We set a dummy interface to prevent the "No interface" error
   let printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
+    interface: 'printer:dummy' 
   });
-
   try {
     printer.alignCenter();
     printer.setTextDoubleHeight();
@@ -102,19 +90,16 @@ app.post('/print', async (req, res) => {
     printer.setTextNormal();
     printer.println(header_text || "");
     printer.drawLine();
-
     printer.alignLeft();
     printer.println(`Bill: ${order_number || 'N/A'}`);
     printer.println(`Date: ${new Date().toLocaleString()}`);
     printer.drawLine();
-
     printer.tableCustom([
       { text: "Item", align: "LEFT", width: 0.5 },
       { text: "Qty", align: "CENTER", width: 0.2 },
       { text: "Price", align: "RIGHT", width: 0.3 }
     ]);
     printer.drawLine();
-
     if (items && Array.isArray(items)) {
       items.forEach(item => {
         printer.tableCustom([
@@ -124,7 +109,6 @@ app.post('/print', async (req, res) => {
         ]);
       });
     }
-
     printer.drawLine();
     printer.alignRight();
     printer.println(`Subtotal: ${subtotal}`);
@@ -134,40 +118,30 @@ app.post('/print', async (req, res) => {
     printer.println(`TOTAL: ${total}`);
     printer.setTextNormal();
     printer.drawLine();
-
     printer.alignCenter();
     printer.println(footer_text || "Thank you!");
     printer.cut();
-
     const receiptText = printer.getText();
     const tempFile = path.join(process.cwd(), 'temp_receipt.txt');
     
     fs.writeFileSync(tempFile, receiptText);
-
-    // Improved PowerShell command with better quoting for names with spaces
+    // PowerShell command with proper quoting
     const psCommand = `powershell -Command "Get-Content -Path '${tempFile}' | Out-Printer -Name '${targetPrinter}'"`;
     
     console.log(`[DEBUG] Running command: ${psCommand}`);
-
     exec(psCommand, (error, stdout, stderr) => {
       if (error) {
         console.error('[DEBUG] Execution Error:', error);
-        console.error('[DEBUG] Stderr:', stderr);
-        return res.status(500).json({ 
-          error: "Windows Print Error", 
-          details: stderr || error.message 
-        });
+        return res.status(500).json({ error: "Windows Print Error", details: stderr || error.message });
       }
       console.log(`[DEBUG] Successfully sent to printer: ${targetPrinter}`);
       res.json({ status: 'printed' });
     });
-
   } catch (error) {
     console.error("[DEBUG] Print Logic Error:", error);
     res.status(500).json({ error: "Bridge Internal Error", details: error.message });
   }
 });
-
 const PORT = 5001;
 app.listen(PORT, () => {
   console.log(`Scale Bridge running on http://localhost:${PORT}`);
