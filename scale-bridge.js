@@ -1,9 +1,12 @@
-import { SerialPort } from 'serialport';
-import { ReadlineParser } from '@serialport/parser-readline';
-import express from 'express';
-import cors from 'cors';
-import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
-import printerList from 'printer';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+const { SerialPort } = require('serialport');
+const { ReadlineParser } = require('@serialport/parser-readline');
+const express = require('express');
+const cors = require('cors');
+const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
+const printerList = require('printer');
 
 const app = express();
 app.use(cors());
@@ -20,17 +23,26 @@ console.log('Smart Scale Bridge ready...');
 app.get('/connect', (req, res) => {
   if (port && port.isOpen) return res.json({ status: 'already_connected' });
   currentWeight = "0.000";
-  port = new SerialPort({ path: 'COM3', baudRate: 9600, autoOpen: false });
-  parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
-  parser.on('data', (data) => {
-    const match = data.match(/(\d+\.\d+)/);
-    if (match) currentWeight = match[1];
-  });
-  port.open((err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    console.log('POS grabbed COM3');
-    res.json({ status: 'connected' });
-  });
+  
+  try {
+    port = new SerialPort({ path: 'COM3', baudRate: 9600, autoOpen: false });
+    parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+    parser.on('data', (data) => {
+      const match = data.match(/(\d+\.\d+)/);
+      if (match) currentWeight = match[1];
+    });
+    port.open((err) => {
+      if (err) {
+        console.error('Serial Port Open Error:', err.message);
+        return res.status(500).json({ error: err.message });
+      }
+      console.log('POS grabbed COM3');
+      res.json({ status: 'connected' });
+    });
+  } catch (err) {
+    console.error('Serial Port Creation Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/disconnect', (req, res) => {
