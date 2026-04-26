@@ -25,7 +25,7 @@ console.log('Smart Scale Bridge ready (PowerShell Mode)...');
 app.get('/connect', (req, res) => {
   if (port && port.isOpen) return res.json({ status: 'already_connected' });
   currentWeight = "0.000";
-
+  
   try {
     port = new SerialPort({ path: 'COM3', baudRate: 9600, autoOpen: false });
     parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
@@ -67,7 +67,6 @@ app.get('/weight', (req, res) => {
 
 app.get('/list-printers', (req, res) => {
   console.log('Fetching system printers via PowerShell...');
-  // Get printer names using PowerShell to avoid native module issues
   exec('powershell "Get-Printer | Select-Object -ExpandProperty Name"', (error, stdout) => {
     if (error) {
       console.error('PowerShell Error:', error);
@@ -77,27 +76,19 @@ app.get('/list-printers', (req, res) => {
       .map(name => name.trim())
       .filter(name => name.length > 0)
       .map(name => ({ name }));
-
+    
     console.log(`Found ${printers.length} printers.`);
     res.json(printers);
   });
 });
 
 app.post('/print', async (req, res) => {
-  const {
-    order_number,
-    restaurant_name,
-    items,
-    subtotal,
-    tax,
-    discount,
-    total,
-    header_text,
-    footer_text,
-    printer_name
+  const { 
+    order_number, restaurant_name, items, subtotal, tax, discount, total, header_text, footer_text, printer_name 
   } = req.body;
 
-  console.log(`Attempting to print to: ${printer_name || 'System Default'}`);
+  const targetPrinter = printer_name || "eSSAE pos-80";
+  console.log(`[DEBUG] Attempting to print to: "${targetPrinter}"`);
 
   let printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
@@ -148,33 +139,32 @@ app.post('/print', async (req, res) => {
     printer.println(footer_text || "Thank you!");
     printer.cut();
 
-    // Generate the receipt as text/buffer
     const receiptText = printer.getText();
     const tempFile = path.join(process.cwd(), 'temp_receipt.txt');
-
-    // Save to temp file
+    
     fs.writeFileSync(tempFile, receiptText);
 
-    // Send to printer via PowerShell
-    // If no printer_name provided, use default
-    const targetPrinter = printer_name || "eSSAE pos-80";
-    const psCommand = `powershell "Get-Content -Path '${tempFile}' | Out-Printer -Name '${targetPrinter}'"`;
+    // Improved PowerShell command with better quoting for names with spaces
+    const psCommand = `powershell -Command "Get-Content -Path '${tempFile}' | Out-Printer -Name '${targetPrinter}'"`;
+    
+    console.log(`[DEBUG] Running command: ${psCommand}`);
 
-    exec(psCommand, (error) => {
+    exec(psCommand, (error, stdout, stderr) => {
       if (error) {
-        console.error('Print Execution Error:', error);
-        return res.status(500).json({ error: error.message });
+        console.error('[DEBUG] Execution Error:', error);
+        console.error('[DEBUG] Stderr:', stderr);
+        return res.status(500).json({ 
+          error: "Windows Print Error", 
+          details: stderr || error.message 
+        });
       }
-      console.log(`Successfully sent to printer: ${targetPrinter}`);
+      console.log(`[DEBUG] Successfully sent to printer: ${targetPrinter}`);
       res.json({ status: 'printed' });
     });
 
   } catch (error) {
-    console.error("Print Logic Error:", error);
-    res.status(500).json({
-      error: error.message || "Unknown hardware error",
-      details: error.toString()
-    });
+    console.error("[DEBUG] Print Logic Error:", error);
+    res.status(500).json({ error: "Bridge Internal Error", details: error.message });
   }
 });
 
