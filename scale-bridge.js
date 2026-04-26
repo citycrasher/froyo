@@ -6,7 +6,9 @@ const { ReadlineParser } = require('@serialport/parser-readline');
 const express = require('express');
 const cors = require('cors');
 const { ThermalPrinter, PrinterTypes } = require("node-thermal-printer");
-const printerList = require('printer');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -16,14 +18,14 @@ let port = null;
 let currentWeight = "0.000";
 let parser = null;
 
-console.log('Smart Scale Bridge ready...');
+console.log('Smart Scale Bridge ready (PowerShell Mode)...');
 
 // --- SCALE ENDPOINTS ---
 
 app.get('/connect', (req, res) => {
   if (port && port.isOpen) return res.json({ status: 'already_connected' });
   currentWeight = "0.000";
-  
+
   try {
     port = new SerialPort({ path: 'COM3', baudRate: 9600, autoOpen: false });
     parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
@@ -61,28 +63,36 @@ app.get('/weight', (req, res) => {
   res.json({ weight: currentWeight });
 });
 
-// --- PRINTER ENDPOINTS ---
+// --- PRINTER ENDPOINTS (POWERSHELL BASED) ---
 
 app.get('/list-printers', (req, res) => {
-  try {
-    const printers = printerList.getPrinters();
+  console.log('Fetching system printers via PowerShell...');
+  // Get printer names using PowerShell to avoid native module issues
+  exec('powershell "Get-Printer | Select-Object -ExpandProperty Name"', (error, stdout) => {
+    if (error) {
+      console.error('PowerShell Error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    const printers = stdout.split('\r\n')
+      .map(name => name.trim())
+      .filter(name => name.length > 0)
+      .map(name => ({ name }));
+
+    console.log(`Found ${printers.length} printers.`);
     res.json(printers);
-  } catch (error) {
-    console.error("List Printers Error:", error);
-    res.status(500).json({ error: error.message });
-  }
+  });
 });
 
 app.post('/print', async (req, res) => {
-  const { 
-    order_number, 
-    restaurant_name, 
-    items, 
-    subtotal, 
-    tax, 
-    discount, 
-    total, 
-    header_text, 
+  const {
+    order_number,
+    restaurant_name,
+    items,
+    subtotal,
+    tax,
+    discount,
+    total,
+    header_text,
     footer_text,
     printer_name
   } = req.body;
@@ -91,7 +101,6 @@ app.post('/print', async (req, res) => {
 
   let printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
-    interface: printer_name ? `printer:${printer_name}` : 'printer:eSSAE pos-80',
   });
 
   try {
@@ -139,12 +148,30 @@ app.post('/print', async (req, res) => {
     printer.println(footer_text || "Thank you!");
     printer.cut();
 
-    await printer.execute();
-    console.log(`Printed Bill: ${order_number}`);
-    res.json({ status: 'printed' });
+    // Generate the receipt as text/buffer
+    const receiptText = printer.getText();
+    const tempFile = path.join(process.cwd(), 'temp_receipt.txt');
+
+    // Save to temp file
+    fs.writeFileSync(tempFile, receiptText);
+
+    // Send to printer via PowerShell
+    // If no printer_name provided, use default
+    const targetPrinter = printer_name || "eSSAE pos-80";
+    const psCommand = `powershell "Get-Content -Path '${tempFile}' | Out-Printer -Name '${targetPrinter}'"`;
+
+    exec(psCommand, (error) => {
+      if (error) {
+        console.error('Print Execution Error:', error);
+        return res.status(500).json({ error: error.message });
+      }
+      console.log(`Successfully sent to printer: ${targetPrinter}`);
+      res.json({ status: 'printed' });
+    });
+
   } catch (error) {
-    console.error("Print Error Details:", error);
-    res.status(500).json({ 
+    console.error("Print Logic Error:", error);
+    res.status(500).json({
       error: error.message || "Unknown hardware error",
       details: error.toString()
     });
