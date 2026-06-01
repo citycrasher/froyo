@@ -73,7 +73,7 @@ app.get('/list-printers', (req, res) => {
 });
 app.post('/print', async (req, res) => {
   const {
-    order_number, restaurant_name, items, subtotal, tax, cgst, sgst, roundOff, totalQty, discount, total, header_text, footer_text, printer_name
+    order_number, restaurant_name, items, subtotal, tax, cgst, sgst, roundOff, totalQty, discount, containerCharge, total, header_text, footer_text, printer_name
   } = req.body;
   const targetPrinter = printer_name || "eSSAE pos-80";
   console.log(`[DEBUG] Attempting to print to: "${targetPrinter}"`);
@@ -113,9 +113,12 @@ app.post('/print', async (req, res) => {
     printer.drawLine();
     // Use leftRight to format the totals block like the receipt image
     printer.leftRight(`Total Qty: ${totalQty || '0.000'}`, `Sub Total   ${subtotal}`);
-    
+
     if (Number(discount) > 0) {
-      printer.leftRight("", `Discount Fixed  (${discount})`);
+      printer.leftRight("", `Discount Fixed  (-${discount})`);
+    }
+    if (Number(containerCharge) > 0) {
+      printer.leftRight("", `Container Charge   (-${containerCharge})`);
     }
     if (Number(cgst) > 0) {
       printer.leftRight("", `CGST@2.5 2.5%    ${cgst}`);
@@ -123,10 +126,10 @@ app.post('/print', async (req, res) => {
     if (Number(sgst) > 0) {
       printer.leftRight("", `SGST@2.5 2.5%    ${sgst}`);
     }
-    
+
     printer.drawLine();
     printer.leftRight("", `Round off    ${Number(roundOff) >= 0 ? '+' : ''}${roundOff || '0.00'}`);
-    
+
     printer.setTextDoubleHeight();
     printer.leftRight("", `Grand Total  Rs ${total}`);
     printer.setTextNormal();
